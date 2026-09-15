@@ -1,0 +1,13 @@
+# golangci-lint configuration for MicroGit.
+# Keeps the safe default linters (errcheck, govet, ineffassign, staticcheck,
+# unused, gosimple) and relaxes error-checking inside tests where ignoring
+# return values (os.Chdir in cleanups, command RunE in table tests) is fine.
+
+run:
+  timeout: 5m
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
