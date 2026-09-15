@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"microgit/utils"
 	"os"
@@ -9,6 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 )
+
+// checkoutForce, when set via --force, discards uncommitted changes on checkout.
+var checkoutForce bool
 
 // checkoutCmd represents the checkout command
 var checkoutCmd = &cobra.Command{
@@ -24,74 +26,84 @@ This command will:
 1. Restore all files to their state at the specified commit
 2. Update the HEAD reference to point to the checked out commit
 3. Preserve the commit history for future operations`,
-	Run: func(cmd *cobra.Command, args []string) {
-		if len(args) == 0 {
-			fmt.Println("Error: No commit specified")
-			return
+	Example: `  microgit checkout latest
+  microgit checkout 3f8a1c2
+  microgit checkout --force 3f8a1c2`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := ensureRepo(); err != nil {
+			return err
 		}
 
 		savePointHash := args[0]
 
 		if savePointHash == "latest" {
-			latestPath := filepath.Join(utils.DEFAULT_PATH, "LATEST")
-			commit, err := os.ReadFile(latestPath)
-			if err != nil {
-				fmt.Println("Error reading HEAD:", err)
-				return
-			}
-
-			savePointHash = string(commit)
+			savePointHash = getLatest()
+		}
+		if savePointHash == "" {
+			return fmt.Errorf("no commits yet")
 		}
 
-		savePointPath := filepath.Join(utils.DEFAULT_PATH, "objects", savePointHash)
-		data, err := os.ReadFile(savePointPath)
+		resolved, err := resolveHash(savePointHash)
 		if err != nil {
-			fmt.Printf("savePoint %s not found", savePointHash)
-			return
+			return fmt.Errorf("commit %s not found: %w", savePointHash, err)
+		}
+		savePointHash = resolved
+
+		savePoint, err := readCommit(savePointHash)
+		if err != nil {
+			return fmt.Errorf("commit %s not found", savePointHash)
 		}
 
-		var savePoint utils.SavePoint
-		if err := json.Unmarshal(data, &savePoint); err != nil {
-			fmt.Printf("invalid savePoint format: %v", err)
-			return
+		// Refuse to overwrite uncommitted work unless --force is given.
+		if !checkoutForce {
+			dirty, err := workingTreeDirty()
+			if err != nil {
+				return err
+			}
+			if dirty {
+				return fmt.Errorf("you have uncommitted changes; commit them or use --force to discard")
+			}
+		}
+
+		// Files tracked by the commit we're leaving that are absent from the
+		// target must be removed so the working tree matches the target.
+		current := getCommittedFiles()
+		for path := range current {
+			if _, ok := savePoint.Files[path]; !ok {
+				_ = os.Remove(path)
+			}
 		}
 
 		for path, hash := range savePoint.Files {
-			blobPath := filepath.Join(utils.DEFAULT_PATH, "objects", hash)
-
-			content, err := os.ReadFile(blobPath)
+			content, err := utils.ReadObject(hash)
 			if err != nil {
-				fmt.Printf("missing object for file %s", path)
-				return
+				return fmt.Errorf("missing object for file %s", path)
 			}
 
-			err = os.WriteFile(path, content, 0644)
-			if err != nil {
-				fmt.Printf("failed to restore file %s", path)
-				return
+			if err := os.WriteFile(path, content, 0644); err != nil {
+				return fmt.Errorf("failed to restore file %s: %w", path, err)
 			}
+		}
+
+		// Reset the staging area to match the checked-out commit so status
+		// and a subsequent save operate from a consistent baseline.
+		if err := writeIndex(savePoint.Files); err != nil {
+			return fmt.Errorf("failed to reset staging area: %w", err)
 		}
 
 		headPath := filepath.Join(utils.DEFAULT_PATH, "HEAD")
-		err = os.WriteFile(headPath, []byte(savePointHash), 0644)
-		if err != nil {
-			fmt.Printf("Expected HEAD file to be created")
+		if err := utils.WriteFileAtomic(headPath, []byte(savePointHash)); err != nil {
+			return fmt.Errorf("failed to update HEAD: %w", err)
 		}
 
 		fmt.Printf("Successfully checked out commit %s\n", savePointHash)
+		return nil
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(checkoutCmd)
-
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// checkoutCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// checkoutCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	checkoutCmd.Flags().BoolVarP(&checkoutForce, "force", "f", false,
+		"Discard uncommitted changes when checking out")
 }
