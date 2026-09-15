@@ -24,4 +24,12 @@ go.work.sum
 # env file
 .env
 
+# MicroGit's own repository data
 .microgit
+
+# Compiled binary and release artifacts
+/microgit
+/dist/
+
+# macOS
+.DS_Store
