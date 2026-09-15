@@ -28,7 +28,7 @@ func TestInitCommand(t *testing.T) {
 	// Test case 1: Initialize a new repository
 	t.Run("Initialize new repository", func(t *testing.T) {
 		// Run the init command
-		initCmd.Run(nil, nil)
+		initCmd.RunE(nil, nil)
 
 		// Check if .microgit directory was created
 		if _, err := os.Stat(utils.DEFAULT_PATH); os.IsNotExist(err) {
@@ -70,7 +70,7 @@ func TestInitCommand(t *testing.T) {
 	// Test case 2: Try to initialize an already initialized repository
 	t.Run("Initialize existing repository", func(t *testing.T) {
 		// Run the init command again
-		initCmd.Run(nil, nil)
+		initCmd.RunE(nil, nil)
 
 		// Verify that no duplicate files were created
 		entries, err := os.ReadDir(utils.DEFAULT_PATH)
