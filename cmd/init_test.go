@@ -4,6 +4,7 @@ import (
 	"microgit/utils"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -59,10 +60,12 @@ func TestInitCommand(t *testing.T) {
 			t.Errorf("Expected LATEST file to be created")
 		}
 
-		// Check file permissions
-		if info, err := os.Stat(utils.DEFAULT_PATH); err == nil {
-			if info.Mode().Perm() != 0755 {
-				t.Errorf("Expected .microgit directory to have permissions 0755, got %v", info.Mode().Perm())
+		// Check file permissions (Windows doesn't use Unix permission bits).
+		if runtime.GOOS != "windows" {
+			if info, err := os.Stat(utils.DEFAULT_PATH); err == nil {
+				if info.Mode().Perm() != 0755 {
+					t.Errorf("Expected .microgit directory to have permissions 0755, got %v", info.Mode().Perm())
+				}
 			}
 		}
 	})

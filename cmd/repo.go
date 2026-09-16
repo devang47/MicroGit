@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"microgit/utils"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -20,8 +21,9 @@ func ensureRepo() error {
 // shouldIgnore reports whether a path is always excluded from staging and
 // status: the internal repo directory, any (possibly nested) .git directory,
 // and common OS cruft.
-func shouldIgnore(path string) bool {
-	for _, part := range strings.Split(path, string(filepath.Separator)) {
+func shouldIgnore(p string) bool {
+	// Normalize to forward slashes so the check works on Windows too.
+	for _, part := range strings.Split(filepath.ToSlash(p), "/") {
 		switch part {
 		case utils.DEFAULT_PATH, ".git", ".DS_Store":
 			return true
@@ -55,25 +57,27 @@ func newIgnoreMatcher() *ignoreMatcher {
 	return m
 }
 
-// match reports whether path should be ignored.
-func (m *ignoreMatcher) match(path string) bool {
-	if shouldIgnore(path) {
+// match reports whether p should be ignored. Matching is done on forward-slash
+// paths with slash-based glob semantics so it behaves identically on Windows.
+func (m *ignoreMatcher) match(p string) bool {
+	if shouldIgnore(p) {
 		return true
 	}
 
-	base := filepath.Base(path)
+	slashPath := filepath.ToSlash(p)
+	base := path.Base(slashPath)
 	for _, pat := range m.patterns {
-		p := strings.TrimSuffix(pat, "/")
-		p = strings.TrimPrefix(p, "/")
+		pp := strings.TrimSuffix(pat, "/")
+		pp = strings.TrimPrefix(pp, "/")
 
-		if ok, _ := filepath.Match(p, base); ok {
+		if ok, _ := path.Match(pp, base); ok {
 			return true
 		}
-		if ok, _ := filepath.Match(p, path); ok {
+		if ok, _ := path.Match(pp, slashPath); ok {
 			return true
 		}
 		// A bare directory pattern ("build") ignores everything under it.
-		if strings.HasPrefix(path, p+string(filepath.Separator)) {
+		if strings.HasPrefix(slashPath, pp+"/") {
 			return true
 		}
 	}
