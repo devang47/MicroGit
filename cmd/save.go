@@ -26,25 +26,11 @@ func setHead(hash string) error {
 	headPath := filepath.Join(utils.DEFAULT_PATH, "HEAD")
 	latestPath := filepath.Join(utils.DEFAULT_PATH, "LATEST")
 
-	errChan := make(chan error, 2) // Buffer for 2 potential errors
-
-	// Write HEAD file asynchronously
-	go func() {
-		err := os.WriteFile(headPath, []byte(hash), 0644)
-		errChan <- err
-	}()
-
-	// Write LATEST file asynchronously
-	go func() {
-		err := os.WriteFile(latestPath, []byte(hash), 0644)
-		errChan <- err
-	}()
-
-	// Wait for both operations to complete and check for errors
-	for i := 0; i < 2; i++ {
-		if err := <-errChan; err != nil {
-			return fmt.Errorf("failed to write reference file: %w", err)
-		}
+	if err := utils.WriteFileAtomic(headPath, []byte(hash)); err != nil {
+		return fmt.Errorf("failed to write HEAD: %w", err)
+	}
+	if err := utils.WriteFileAtomic(latestPath, []byte(hash)); err != nil {
+		return fmt.Errorf("failed to write LATEST: %w", err)
 	}
 
 	return nil
@@ -96,26 +82,33 @@ var saveCmd = &cobra.Command{
 	Long: `Save the current state of all staged files as a new commit.
 This command requires a commit message that describes the changes being saved.
 The staged files will be committed and the staging area will be cleared after the save.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		if len(args) < 1 {
-			fmt.Println("Usage: microgit save \"message\"")
-			return
+	Example: `  microgit save "add login form"`,
+	Args:    cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := ensureRepo(); err != nil {
+			return err
 		}
 
-		message := args[0]
+		// Join all args so unquoted multi-word messages aren't truncated.
+		message := strings.Join(args, " ")
 
 		index, err := readIndex()
 		if err != nil {
-			fmt.Println("could not read index: %w", err)
-			return
+			return fmt.Errorf("could not read index: %w", err)
 		}
 
 		if len(index) == 0 {
-			fmt.Println("No files have been added")
-			return
+			return fmt.Errorf("no files have been added")
 		}
 
 		parent := getHead()
+
+		// Warn when committing from a detached (non-tip) checkout: doing so
+		// makes any commits after the current HEAD unreachable.
+		if latest := getLatest(); parent != "" && latest != "" && parent != latest {
+			fmt.Printf("Warning: committing from an older checkout (%s); commits after it will become unreachable.\n", parent)
+		}
+
 		timestamp := time.Now().Format(time.RFC3339)
 
 		savePoint := utils.SavePoint{
@@ -127,22 +120,21 @@ The staged files will be committed and the staging area will be cleared after th
 
 		hash, err := writeSavePointObject(savePoint)
 		if err != nil {
-			fmt.Println("failed to write commit: %w", err)
-			return
+			return fmt.Errorf("failed to write commit: %w", err)
 		}
 
-		err = setHead(hash)
-		if err != nil {
-			fmt.Println("failed to update HEAD: %w", err)
-			return
+		if err := setHead(hash); err != nil {
+			return fmt.Errorf("failed to update HEAD: %w", err)
 		}
 
 		fmt.Printf("Saved: %s\n", hash)
 
-		// Clear the staging area
-
+		// Clear the staging area.
 		indexPath := filepath.Join(utils.DEFAULT_PATH, "index")
-		os.WriteFile(indexPath, []byte(""), 0644)
+		if err := utils.WriteFileAtomic(indexPath, []byte("")); err != nil {
+			return fmt.Errorf("failed to clear staging area: %w", err)
+		}
+		return nil
 	},
 }
 

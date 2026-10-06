@@ -55,7 +55,7 @@ func TestAddCmd(t *testing.T) {
 	}
 
 	// Init a new repo
-	initCmd.Run(nil, nil)
+	initCmd.RunE(nil, nil)
 
 	// Create a test file
 	testContent := []byte("test content")
@@ -64,11 +64,11 @@ func TestAddCmd(t *testing.T) {
 	}
 
 	// Run the add command
-	addCmd.Run(nil, []string{"test.txt"})
+	addCmd.RunE(nil, []string{"test.txt"})
 
 	// Verify the object was created
 	hash := utils.HashContent(testContent)
-	objectPath := filepath.Join(utils.DEFAULT_PATH, "objects", hash)
+	objectPath := utils.ObjectPath(hash)
 	if _, err := os.Stat(objectPath); os.IsNotExist(err) {
 		t.Errorf("object file was not created at %s", objectPath)
 	}

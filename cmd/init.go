@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"microgit/utils"
 
@@ -17,27 +18,32 @@ var initCmd = &cobra.Command{
 This creates the necessary directory structure and files for version control.
 The repository will be initialized in a .microgit directory.`,
 
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		repoDir := utils.DEFAULT_PATH
-		objectsDir := utils.DEFAULT_PATH + "/objects"
+		objectsDir := filepath.Join(repoDir, "objects")
 
-		if _, err := os.Stat(repoDir); !os.IsNotExist(err) {
-			fmt.Println("\nRepository already initialized.")
-			return
+		if utils.IsInitialized() {
+			fmt.Println("Repository already initialized.")
+			return nil
 		}
 
-		os.Mkdir(repoDir, 0755)
-		os.Mkdir(objectsDir, 0755)
+		if err := os.Mkdir(repoDir, 0755); err != nil {
+			return fmt.Errorf("create repository directory: %w", err)
+		}
+		if err := os.Mkdir(objectsDir, 0755); err != nil {
+			return fmt.Errorf("create objects directory: %w", err)
+		}
 
-		// Create index and HEAD files
-		// Staging area
-		os.WriteFile(repoDir+"/index", []byte(""), 0644)
-		// Pointer to the current commit
-		os.WriteFile(repoDir+"/HEAD", []byte(""), 0644)
-		// Pointer to the latest commit
-		os.WriteFile(repoDir+"/LATEST", []byte(""), 0644)
+		// index is the staging area; HEAD points at the current commit;
+		// LATEST points at the newest commit (the tip).
+		for _, name := range []string{"index", "HEAD", "LATEST"} {
+			if err := os.WriteFile(filepath.Join(repoDir, name), []byte(""), 0644); err != nil {
+				return fmt.Errorf("create %s file: %w", name, err)
+			}
+		}
 
 		fmt.Printf("Initialized empty SCM repository in %s/\n", utils.DEFAULT_PATH)
+		return nil
 	},
 }
 

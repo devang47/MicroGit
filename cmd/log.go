@@ -4,23 +4,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"microgit/utils"
-	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 )
 
 func readCommit(hash string) (utils.SavePoint, error) {
-	objectPath := filepath.Join(utils.DEFAULT_PATH, "objects", hash)
-
-	data, err := os.ReadFile(objectPath)
+	data, err := utils.ReadObject(hash)
 	if err != nil {
 		return utils.SavePoint{}, fmt.Errorf("could not read commit object: %w", err)
 	}
 
 	var commit utils.SavePoint
-	err = json.Unmarshal(data, &commit)
-	if err != nil {
+	if err := json.Unmarshal(data, &commit); err != nil {
 		return utils.SavePoint{}, fmt.Errorf("failed to parse commit JSON: %w", err)
 	}
 	return commit, nil
@@ -36,17 +31,22 @@ For each commit, it shows:
 - The timestamp
 - The commit message
 - The list of files that were modified`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := ensureRepo(); err != nil {
+			return err
+		}
+
 		head := getHead()
 		if head == "" {
 			fmt.Println("No commits yet.")
+			return nil
 		}
 
 		current := head
 		for current != "" {
 			commit, err := readCommit(current)
 			if err != nil {
-				fmt.Println("Error reading commit:", err)
+				return fmt.Errorf("reading commit %s: %w", current, err)
 			}
 
 			fmt.Printf("Commit: %s\n", current)
@@ -61,6 +61,7 @@ For each commit, it shows:
 
 			current = commit.Parent
 		}
+		return nil
 	},
 }
 

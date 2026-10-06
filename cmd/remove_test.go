@@ -4,6 +4,7 @@ import (
 	"microgit/utils"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -30,7 +31,7 @@ func TestRemoveCmd(t *testing.T) {
 		t.Errorf("WriteFile failed %v", err)
 	}
 
-	initCmd.Run(nil, nil)
+	initCmd.RunE(nil, nil)
 
 	// Create test index file
 	indexPath := filepath.Join(utils.DEFAULT_PATH, "index")
@@ -74,7 +75,7 @@ func TestRemoveCmd(t *testing.T) {
 			}
 
 			// Execute remove command
-			removeCmd.Run(nil, tt.args)
+			removeCmd.RunE(nil, tt.args)
 
 			// Read resulting index
 			got, err := os.ReadFile(indexPath)
@@ -86,5 +87,29 @@ func TestRemoveCmd(t *testing.T) {
 				t.Errorf("Remove command result = %v, want %v", string(got), tt.expectedIndex)
 			}
 		})
+	}
+}
+
+// TestRemovePrefixCollision covers the fix for prefix-based matching: removing
+// "file.txt" must not also un-stage "foobar.txt".
+func TestRemovePrefixCollision(t *testing.T) {
+	setupTestRepo(t)
+
+	indexPath := filepath.Join(utils.DEFAULT_PATH, "index")
+	if err := os.WriteFile(indexPath, []byte("file.txt h1\nfoobar.txt h2"), 0644); err != nil {
+		t.Fatalf("failed to seed index: %v", err)
+	}
+
+	removeCmd.RunE(nil, []string{"file.txt"})
+
+	got, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatalf("failed to read index: %v", err)
+	}
+	if !strings.Contains(string(got), "foobar.txt") {
+		t.Errorf("foobar.txt should remain after removing file.txt; got %q", got)
+	}
+	if strings.Contains(string(got), "file.txt h1") {
+		t.Errorf("file.txt should be removed; got %q", got)
 	}
 }

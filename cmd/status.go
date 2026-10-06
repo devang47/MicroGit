@@ -5,26 +5,27 @@ import (
 	"microgit/utils"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
 
-type fileResult struct {
-	data interface{}
-	err  error
-}
-
 func getWorkingFiles() (map[string]string, error) {
 	files := make(map[string]string)
 
+	matcher := newIgnoreMatcher()
 	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
-		// Skip internal directory
-		if strings.HasPrefix(path, utils.DEFAULT_PATH) || strings.HasPrefix(path, ".git/") || info.IsDir() {
+		if info.IsDir() {
+			if matcher.match(path) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if matcher.match(path) {
 			return nil
 		}
 
@@ -54,45 +55,52 @@ func getCommittedFiles() map[string]string {
 }
 
 func getStatusData() (map[string]string, map[string]string, map[string]string, error) {
-	indexChan := make(chan fileResult)
-	committedChan := make(chan fileResult)
-	workingChan := make(chan fileResult)
-
-	// Get index files asynchronously
-	go func() {
-		index, err := readIndex()
-		indexChan <- fileResult{data: index, err: err}
-	}()
-
-	// Get committed files asynchronously
-	go func() {
-		committed := getCommittedFiles()
-		committedChan <- fileResult{data: committed, err: nil}
-	}()
-
-	// Get working files asynchronously
-	go func() {
-		working, err := getWorkingFiles()
-		workingChan <- fileResult{data: working, err: err}
-	}()
-
-	// Collect results
-	indexResult := <-indexChan
-	committedResult := <-committedChan
-	workingResult := <-workingChan
-
-	// Check for errors
-	if indexResult.err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to read index: %w", indexResult.err)
-	}
-	if workingResult.err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to get working files: %w", workingResult.err)
+	index, err := readIndex()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to read index: %w", err)
 	}
 
-	return indexResult.data.(map[string]string),
-		committedResult.data.(map[string]string),
-		workingResult.data.(map[string]string),
-		nil
+	committed := getCommittedFiles()
+
+	working, err := getWorkingFiles()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to get working files: %w", err)
+	}
+
+	return index, committed, working, nil
+}
+
+// workingTreeDirty reports whether the repository has staged changes or
+// unsaved working-tree modifications relative to the current commit.
+func workingTreeDirty() (bool, error) {
+	index, committed, working, err := getStatusData()
+	if err != nil {
+		return false, err
+	}
+
+	// Staged changes not yet committed.
+	for path, h := range index {
+		if committed[path] != h {
+			return true, nil
+		}
+	}
+	// Tracked files modified in the working tree.
+	for path, wh := range working {
+		base, tracked := index[path]
+		if !tracked {
+			base, tracked = committed[path]
+		}
+		if tracked && base != wh {
+			return true, nil
+		}
+	}
+	// Tracked files deleted from the working tree.
+	for path := range committed {
+		if _, ok := working[path]; !ok {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // statusCmd represents the status command
@@ -103,11 +111,14 @@ var statusCmd = &cobra.Command{
 Shows which files have been staged for the next commit and which files
 are untracked. This helps you understand what will be included in your
 next commit.`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := ensureRepo(); err != nil {
+			return err
+		}
+
 		index, committed, working, err := getStatusData()
 		if err != nil {
-			fmt.Printf("Error getting status: %v\n", err)
-			return
+			return err
 		}
 
 		fmt.Println("=== Staged ===")
@@ -118,8 +129,14 @@ next commit.`,
 		}
 
 		fmt.Println("\n=== Modified but not Staged ===")
-		for path, hash := range working {
-			if indexHash, ok := index[path]; ok && indexHash != hash {
+		for path, workingHash := range working {
+			// Compare the working copy against its baseline: the staged
+			// version if present, otherwise the last committed version.
+			baseline, tracked := index[path]
+			if !tracked {
+				baseline, tracked = committed[path]
+			}
+			if tracked && baseline != workingHash {
 				fmt.Println(path)
 			}
 		}
@@ -150,6 +167,7 @@ next commit.`,
 				fmt.Println(path + " (was staged)")
 			}
 		}
+		return nil
 	},
 }
 

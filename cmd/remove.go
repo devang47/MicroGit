@@ -24,44 +24,48 @@ This command will:
 1. Remove the specified files from the index
 2. Keep the files in your working directory
 3. Allow you to re-stage them later if needed`,
-	Run: func(cmd *cobra.Command, args []string) {
-		if len(args) == 0 {
-			fmt.Println("Error: No files specified")
-			return
+	Args: cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := ensureRepo(); err != nil {
+			return err
 		}
 
-		if args[0] == "." {
-			indexPath := filepath.Join(utils.DEFAULT_PATH, "index")
-			err := os.WriteFile(indexPath, []byte(""), 0644)
-			if err != nil {
-				fmt.Printf("Failed to unstage files: %v", err)
-				return
-			}
+		indexPath := filepath.Join(utils.DEFAULT_PATH, "index")
 
-			return
+		if args[0] == "." {
+			if err := utils.WriteFileAtomic(indexPath, []byte("")); err != nil {
+				return fmt.Errorf("unstage all files: %w", err)
+			}
+			return nil
 		}
 
 		for _, file := range args {
-			indexPath := filepath.Join(utils.DEFAULT_PATH, "index")
-
 			data, err := os.ReadFile(indexPath)
 			if err != nil {
-				fmt.Println("Failed to read index file", err)
+				return fmt.Errorf("read index: %w", err)
 			}
 
 			lines := strings.Split(string(data), "\n")
 
 			var stagedFiles []string
-
 			for _, line := range lines {
-				if !strings.HasPrefix(line, file) {
+				if line == "" {
+					continue
+				}
+				// The index stores "path hash" (or just "path"); match on the
+				// exact path field so 'remove foo' doesn't drop 'foobar'.
+				path := strings.SplitN(line, " ", 2)[0]
+				if path != file {
 					stagedFiles = append(stagedFiles, line)
 				}
 			}
 
 			newIndex := strings.Trim(strings.Join(stagedFiles, "\n"), "\n")
-			os.WriteFile(indexPath, []byte(newIndex), 0644)
+			if err := utils.WriteFileAtomic(indexPath, []byte(newIndex)); err != nil {
+				return fmt.Errorf("update index: %w", err)
+			}
 		}
+		return nil
 	},
 }
 

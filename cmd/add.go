@@ -34,14 +34,13 @@ func updateIndex(filePath, hash string) error {
 	}
 
 	newIndex := strings.Trim(strings.Join(lines, "\n"), "\n")
-	return os.WriteFile(indexPath, []byte(newIndex), 0644)
+	return utils.WriteFileAtomic(indexPath, []byte(newIndex))
 }
 
 func stageFile(path, fileName string) error {
 	content, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Printf("Error reading file '%s': %v\n", fileName, err)
-		return nil
+		return fmt.Errorf("reading file %q: %w", fileName, err)
 	}
 
 	// Calculate hash
@@ -49,14 +48,12 @@ func stageFile(path, fileName string) error {
 
 	// Write object
 	if err := utils.WriteObject(hash, content); err != nil {
-		fmt.Printf("Error writing object for '%s': %v\n", fileName, err)
-		return nil
+		return fmt.Errorf("writing object for %q: %w", fileName, err)
 	}
 
 	// Update index
 	if err := updateIndex(path, hash); err != nil {
-		fmt.Printf("Error updating index for '%s': %v\n", fileName, err)
-		return nil
+		return fmt.Errorf("updating index for %q: %w", fileName, err)
 	}
 
 	fmt.Printf("Added %s (hash: %s)\n", path, hash)
@@ -79,40 +76,44 @@ The add command will:
 2. Store the file content in the objects directory
 3. Update the index with the file path and corresponding hash
 
-Files in the .microgit/ and .git/ directories are automatically ignored.`,
-
-	Run: func(cmd *cobra.Command, args []string) {
-		if len(args) == 0 {
-			fmt.Println("Error: No files specified")
-			return
+Files in the .microgit/ and .git/ directories are automatically ignored, as
+are paths matched by a .gitignore file.`,
+	Example: `  microgit add main.go utils.go
+  microgit add .`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := ensureRepo(); err != nil {
+			return err
 		}
 
 		if args[0] == "." {
-			err := filepath.WalkDir(".", func(path string, file os.DirEntry, err error) error {
+			matcher := newIgnoreMatcher()
+			return filepath.WalkDir(".", func(path string, file os.DirEntry, err error) error {
 				if err != nil {
 					return err
 				}
 
-				if file.IsDir() || strings.HasPrefix(path, utils.DEFAULT_PATH) || strings.HasPrefix(path, ".git/") {
+				if file.IsDir() {
+					if matcher.match(path) {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+
+				if matcher.match(path) {
 					return nil
 				}
 
 				return stageFile(path, file.Name())
 			})
-			if err != nil {
-				fmt.Printf("Error reading directory: %v\n", err)
-				return
-			}
-			return
 		}
 
 		for _, file := range args {
-			err := stageFile(file, file)
-			if err != nil {
-				fmt.Printf("Error staging file: %v", err)
-				continue
+			if err := stageFile(file, file); err != nil {
+				return err
 			}
 		}
+		return nil
 	},
 }
 

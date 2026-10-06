@@ -4,6 +4,7 @@ import (
 	"microgit/utils"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -28,7 +29,7 @@ func TestInitCommand(t *testing.T) {
 	// Test case 1: Initialize a new repository
 	t.Run("Initialize new repository", func(t *testing.T) {
 		// Run the init command
-		initCmd.Run(nil, nil)
+		initCmd.RunE(nil, nil)
 
 		// Check if .microgit directory was created
 		if _, err := os.Stat(utils.DEFAULT_PATH); os.IsNotExist(err) {
@@ -59,10 +60,12 @@ func TestInitCommand(t *testing.T) {
 			t.Errorf("Expected LATEST file to be created")
 		}
 
-		// Check file permissions
-		if info, err := os.Stat(utils.DEFAULT_PATH); err == nil {
-			if info.Mode().Perm() != 0755 {
-				t.Errorf("Expected .microgit directory to have permissions 0755, got %v", info.Mode().Perm())
+		// Check file permissions (Windows doesn't use Unix permission bits).
+		if runtime.GOOS != "windows" {
+			if info, err := os.Stat(utils.DEFAULT_PATH); err == nil {
+				if info.Mode().Perm() != 0755 {
+					t.Errorf("Expected .microgit directory to have permissions 0755, got %v", info.Mode().Perm())
+				}
 			}
 		}
 	})
@@ -70,7 +73,7 @@ func TestInitCommand(t *testing.T) {
 	// Test case 2: Try to initialize an already initialized repository
 	t.Run("Initialize existing repository", func(t *testing.T) {
 		// Run the init command again
-		initCmd.Run(nil, nil)
+		initCmd.RunE(nil, nil)
 
 		// Verify that no duplicate files were created
 		entries, err := os.ReadDir(utils.DEFAULT_PATH)

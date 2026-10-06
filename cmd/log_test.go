@@ -26,16 +26,14 @@ func TestReadCommit(t *testing.T) {
 		t.Fatalf("Failed to change to temp directory: %v", err)
 	}
 
-	objectsDir := filepath.Join(utils.DEFAULT_PATH, "objects")
-
 	err = os.WriteFile("temp.txt", []byte("testing"), 0644)
 	if err != nil {
 		t.Errorf("WriteFile failed %v", err)
 	}
 
-	initCmd.Run(nil, nil)
-	addCmd.Run(nil, []string{"temp.txt"})
-	saveCmd.Run(nil, []string{"temp"})
+	initCmd.RunE(nil, nil)
+	addCmd.RunE(nil, []string{"temp.txt"})
+	saveCmd.RunE(nil, []string{"temp"})
 
 	headPath := filepath.Join(utils.DEFAULT_PATH, "HEAD")
 	data, err := os.ReadFile(headPath)
@@ -71,11 +69,10 @@ func TestReadCommit(t *testing.T) {
 	})
 
 	t.Run("invalid JSON", func(t *testing.T) {
-		// Write invalid JSON to file
+		// Store a well-formed (compressed) object whose payload is not valid
+		// commit JSON, so readCommit fails at the parse step.
 		commitHash := "invalid123"
-		invalidJSON := []byte("{invalid json")
-		commitPath := filepath.Join(objectsDir, commitHash)
-		if err := os.WriteFile(commitPath, invalidJSON, 0644); err != nil {
+		if err := utils.WriteObject(commitHash, []byte("{invalid json")); err != nil {
 			t.Fatalf("Failed to write invalid commit: %v", err)
 		}
 
